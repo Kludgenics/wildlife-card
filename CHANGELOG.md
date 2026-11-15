@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.0 — 2026-11-15
+
+- **Sub-label matching & opt-in dynamic discovery (`species: auto`):** Keeps the default Frigate+ `DEFAULT_SPECIES` list intact out of the box while matching Frigate `sub_label`s, and adds `species: auto` (with optional `aliases`, `glyphs`, and `ignore_labels` in YAML) for general detectors + classifiers such as MegaDetector + SpeciesNet.
+- **Configurable clip lead-in & lead-out (`clip_lead_in`, `clip_lead_out`):** Optional seconds before/after a sighting via signed Frigate VOD playlists and recording MP4s (falling back cleanly to event clips when recordings have expired).
+
 ## 1.3.4 — 2026-11-14
 
 - **Inside the Companion apps the Frigate button opens Home Assistant's own Frigate panel.** 1.3.3 sent the app's view to the ingress address, and the app answered by reloading the frontend, so the tap landed on the default dashboard and never reached Frigate. The panel is the one route known to work there. It opens Frigate's front page rather than the sighting; browsers keep the link to the sighting itself, as does a plain `frigate_url`.
