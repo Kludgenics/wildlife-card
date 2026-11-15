@@ -25,22 +25,153 @@
  *     start: '23:00'
  *     end: '05:00'
  *     person_window: 120          # seconds either side to look for a person
- *   species:                      # replaces the built-in list when given
+ *   species:                      # optional; omit for dynamic discovery from Frigate
  *     - { id: rodent, name: Rodents, labels: [rodent], glyph: 🐀 }
  */
 (() => {
   const VERSION = __VERSION__;
 
-  const DEFAULT_SPECIES = [
-    { id: 'rodent', name: 'Rodents', one: 'Rodent', labels: ['rodent'], glyph: '🐀' },
-    { id: 'cat', name: 'Cats', one: 'Cat', labels: ['cat'], glyph: '🐈' },
-    { id: 'rabbit', name: 'Rabbits', one: 'Rabbit', labels: ['rabbit'], glyph: '🐇' },
-    { id: 'bird', name: 'Birds', one: 'Bird', labels: ['bird'], glyph: '🐦' },
-    { id: 'raccoon', name: 'Raccoons', one: 'Raccoon', labels: ['raccoon'], glyph: '🦝' },
-    { id: 'coyote', name: 'Coyotes', one: 'Coyote', labels: ['coyote'], glyph: '🐺' },
-    { id: 'squirrel', name: 'Squirrels', one: 'Squirrel', labels: ['squirrel'], glyph: '🐿️' },
-    { id: 'other', name: 'Others', one: 'Other', labels: ['fox', 'skunk', 'possum', 'snake'], glyph: '🐾' },
+  // Non-wildlife detector classes (MegaDetector person/car, COCO objects, etc.)
+  const NON_WILDLIFE = new Set([
+    'person', 'human', 'face', 'car', 'vehicle', 'bicycle', 'motorcycle',
+    'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light',
+    'fire hydrant', 'stop sign', 'parking meter', 'bench', 'backpack',
+    'umbrella', 'handbag', 'tie', 'suitcase', 'bottle', 'cup', 'chair',
+    'couch', 'potted plant', 'bed', 'dining table', 'toilet', 'tv',
+    'laptop', 'keyboard', 'cell phone', 'book', 'clock', 'vase',
+    'package', 'license_plate', 'amazon', 'fedex', 'ups', 'usps', 'dhl',
+    'blank', 'none', 'on_demand',
+  ]);
+  const EMPTY_SUB = new Set(['blank', 'none', 'unknown', 'animal', 'wildlife']);
+
+  // Common-name mapping for SpeciesNet taxonomic rollups and Latin names.
+  const TAXON_COMMON = {
+    sciuridae: 'Squirrel', canidae: 'Canine', canine: 'Canine', felidae: 'Cat',
+    procyonidae: 'Raccoon', didelphidae: 'Opossum', mephitidae: 'Skunk',
+    mustelidae: 'Weasel', cervidae: 'Deer', leporidae: 'Rabbit',
+    dasypodidae: 'Armadillo', chlamyphoridae: 'Armadillo', ursidae: 'Bear',
+    suidae: 'Pig', tayassuidae: 'Peccary', bovidae: 'Cattle', equidae: 'Horse',
+    muridae: 'Mouse & rat', cricetidae: 'New World rat & mouse',
+    geomyidae: 'Pocket gopher', heteromyidae: 'Kangaroo rat',
+    castoridae: 'Beaver', erethizontidae: 'Porcupine', corvidae: 'Crow & jay',
+    columbidae: 'Dove & pigeon', accipitridae: 'Hawk & eagle',
+    falconidae: 'Falcon', cathartidae: 'Vulture', strigidae: 'Owl',
+    tytonidae: 'Barn owl', picidae: 'Woodpecker', turdidae: 'Thrush',
+    cardinalidae: 'Cardinal', icteridae: 'Blackbird', passeridae: 'Sparrow',
+    fringillidae: 'Finch', troglodytidae: 'Wren', paridae: 'Chickadee & tit',
+    mimidae: 'Mockingbird & thrasher', anatidae: 'Duck & goose',
+    ardeidae: 'Heron & egret', rallidae: 'Rail & coot',
+    phasianidae: 'Pheasant & quail', odontophoridae: 'Quail',
+    scincidae: 'Skink', colubridae: 'Snake', viperidae: 'Viper',
+    rodentia: 'Rodent', carnivora: 'Carnivore', lagomorpha: 'Rabbit & hare',
+    cingulata: 'Armadillo', didelphimorphia: 'Opossum',
+    artiodactyla: 'Hoofed mammal', chiroptera: 'Bat', eulipotyphla: 'Shrew & mole',
+    passeriformes: 'Songbird', galliformes: 'Gamebird', strigiformes: 'Owl',
+    accipitriformes: 'Hawk & eagle', piciformes: 'Woodpecker',
+    columbiformes: 'Dove & pigeon', anseriformes: 'Waterfowl',
+    pelecaniformes: 'Heron & pelican', caprimulgiformes: 'Nightjar',
+    squamata: 'Lizard & snake', testudines: 'Turtle & tortoise',
+    anura: 'Frog & toad', mammalia: 'Mammal', aves: 'Bird',
+    reptilia: 'Reptile', amphibia: 'Amphibian', animalia: 'Animal',
+    urocyon: 'Fox', vulpes: 'Fox', canis: 'Canine', felis: 'Cat',
+    lynx: 'Bobcat & lynx', puma: 'Cougar', procyon: 'Raccoon',
+    didelphis: 'Opossum', mephitis: 'Skunk', spilogale: 'Spotted skunk',
+    dasypus: 'Armadillo', sylvilagus: 'Cottontail rabbit', lepus: 'Hare',
+    sciurus: 'Tree squirrel', tamiasciurus: 'Pine squirrel',
+    otospermophilus: 'Ground squirrel', ictidomys: 'Ground squirrel',
+    tamias: 'Chipmunk', neotamias: 'Chipmunk', rattus: 'Rat', mus: 'Mouse',
+    peromyscus: 'Deer mouse', neotoma: 'Woodrat', sigmodon: 'Cotton rat',
+    odocoileus: 'Deer', ursus: 'Bear', sus: 'Wild pig', pecari: 'Peccary',
+    meleagris: 'Turkey', corvus: 'Crow & raven', cyanocitta: 'Jay',
+    bubo: 'Horned owl', strix: 'Owl', megascops: 'Screech owl',
+    buteo: 'Hawk', accipiter: 'Hawk', cathartes: 'Vulture',
+    coragyps: 'Black vulture', ardea: 'Heron', anas: 'Duck',
+    zenaida: 'Dove', cardinalis: 'Cardinal', mimus: 'Mockingbird', myotis: 'Bat',
+    'urocyon cinereoargenteus': 'Gray fox', 'vulpes vulpes': 'Red fox',
+    'sciurus niger': 'Eastern fox squirrel',
+    'sciurus carolinensis': 'Eastern gray squirrel',
+    'didelphis virginiana': 'Virginia opossum', 'procyon lotor': 'Northern raccoon',
+    'mephitis mephitis': 'Striped skunk',
+    'dasypus novemcinctus': 'Nine-banded armadillo',
+    'sylvilagus floridanus': 'Eastern cottontail', 'canis latrans': 'Coyote',
+    'canis familiaris': 'Domestic dog', 'canis lupus familiaris': 'Domestic dog',
+    'felis catus': 'Domestic cat', 'odocoileus virginianus': 'White-tailed deer',
+    'lynx rufus': 'Bobcat', 'ursus americanus': 'American black bear',
+    'meleagris gallopavo': 'Wild turkey', 'cardinalis cardinalis': 'Northern cardinal',
+  };
+
+  const GLYPH_RULES = [
+    [/coyote|wolf|wolves|jackal/, '🐺'],
+    [/\bfox\b/, '🦊'],
+    [/squirrel|chipmunk|marmot|groundhog|woodchuck|gopher/, '🐿️'],
+    [/raccoon|coati|ringtail|cacomistle/, '🦝'],
+    [/\bskunk\b/, '🦨'],
+    [/badger|wolverine/, '🦡'],
+    [/otter/, '🦦'],
+    [/beaver/, '🦫'],
+    [/rabbit|hare|cottontail|pika/, '🐇'],
+    [/rodent|\brat\b|\bmice\b|\bmouse\b|vole|woodrat|deermouse|shrew|hamster|gerbil/, '🐀'],
+    [/hedgehog|porcupine/, '🦔'],
+    [/\bcat\b|lynx|bobcat|cougar|puma|ocelot|jaguar|leopard|tiger|lion|cheetah|feline/, '🐈'],
+    [/\bdog\b|canine|canid|puppy/, '🐕'],
+    [/deer|stag|elk|moose|caribou|reindeer|antelope|gazelle|duiker|impala/, '🦌'],
+    [/\bbear\b/, '🐻'],
+    [/\bpig\b|boar|\bhog\b|peccary|javelina|warthog/, '🐗'],
+    [/cattle|\bcow\b|\bbull\b|bison|buffalo/, '🐄'],
+    [/horse|pony|donkey|mule|zebra/, '🐎'],
+    [/goat|ibex/, '🐐'],
+    [/sheep|mouflon|bighorn/, '🐑'],
+    [/\bowl\b/, '🦉'],
+    [/eagle|hawk|falcon|kestrel|kite|osprey|vulture|condor|harrier|buzzard/, '🦅'],
+    [/duck|mallard|teal|merganser|goose|geese|swan|waterfowl|coot|moorhen/, '🦆'],
+    [/turkey/, '🦃'],
+    [/chicken|rooster|pheasant|quail|grouse|partridge|guineafowl|gamebird/, '🐓'],
+    [/heron|egret|crane|stork|ibis|flamingo|pelican/, '🦩'],
+    [/dove|pigeon/, '🕊️'],
+    [/parrot|macaw|parakeet|cockatoo/, '🦜'],
+    [/bird|junco|sparrow|cardinal|finch|wren|thrush|robin|mockingbird|woodpecker|chickadee|\btit\b|nuthatch|warbler|towhee|swallow|oriole|tanager|hummingbird|kingfisher|crow|raven|\bjay\b|magpie|blackbird|grackle|starling|songbird/, '🐦'],
+    [/snake|viper|python|cobra|rattlesnake/, '🐍'],
+    [/lizard|gecko|iguana|\bskink\b|anole|chameleon|gila monster|reptile/, '🦎'],
+    [/turtle|tortoise|terrapin/, '🐢'],
+    [/frog|toad|salamander|newt|amphibian/, '🐸'],
+    [/\bbat\b/, '🦇'],
+    [/monkey|ape|baboon|macaque|tamarin|marmoset/, '🐒'],
   ];
+
+  const SMALL_WORDS = new Set(['of', 'and', 'or', 'the', 'in', 'on', 'at', 'to', 'a', 'an']);
+  const normKey = (s) => String(s || '').trim().toLowerCase().replace(/[_\s]+/g, ' ').replace(/\bgrey\b/g, 'gray');
+  const slugId = (s) => normKey(s).replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'animal';
+  const titleCase = (s) => String(s || '').trim().split(/\s+/).filter(Boolean).map((w, i) => {
+    const lw = w.toLowerCase();
+    return i > 0 && SMALL_WORDS.has(lw) ? lw : lw.replace(/(^|-)([a-z])/g, (_, sep, c) => sep + c.toUpperCase());
+  }).join(' ');
+  const commonLabel = (raw) => {
+    let s = String(raw || '').trim();
+    if (!s) return 'Animal';
+    if (s.includes(';')) {
+      const parts = s.split(';').map((p) => p.trim());
+      s = (parts.length >= 6 && parts[parts.length - 1]) || parts.slice(1, 6).filter(Boolean).join(' ') || s;
+    }
+    const paren = /^(.+?)\s*\([A-Z][a-z]+(?:\s+[a-z]+){0,2}\)$/.exec(s);
+    if (paren) s = paren[1];
+    s = normKey(s);
+    if (TAXON_COMMON[s]) return titleCase(TAXON_COMMON[s]);
+    const tax = /^(.+?)\s+(family|order|class|kingdom|species|genus)$/.exec(s);
+    if (tax && TAXON_COMMON[tax[1]]) {
+      const base = TAXON_COMMON[tax[1]];
+      return titleCase(tax[2] === 'family' ? `${base} family` : base);
+    }
+    return titleCase(s);
+  };
+  const glyphFor = (name, raw = '') => {
+    const hay = `${name} ${raw}`.toLowerCase();
+    for (const [re, g] of GLYPH_RULES) if (re.test(hay)) return g;
+    return '🐾';
+  };
+  const isDogLike = (label, sub) => {
+    const l = normKey(label); const s = normKey(sub);
+    return l === 'dog' || s === 'dog' || s === 'domestic dog' || s === 'canis familiaris' || s === 'canis lupus familiaris';
+  };
 
   const ICON = {
     tune: 'M3,17V19H9V17H3M3,5V7H13V5H3M13,21V19H21V17H13V15H11V21H13M7,9V11H3V13H7V15H9V9H7M21,13V11H11V13H21M15,9H17V7H21V5H17V3H15V9Z',
@@ -185,6 +316,7 @@
     setConfig(config) {
       const c = config || {};
       const coy = c.coyote || {};
+      const custom = Array.isArray(c.species) && c.species.length;
       this._cfg = {
         title: c.title ?? 'Wildlife',
         icon: c.icon || 'mdi:binoculars',
@@ -192,11 +324,12 @@
         refresh: Math.max(60, +c.refresh || 300),
         sun: c.sun_shading !== false,
         indoor: (c.indoor_cameras || ['Attic', 'Crawlspace']).map((s) => s.toLowerCase()),
+        ignore: new Set([...NON_WILDLIFE, ...(Array.isArray(c.ignore_labels) ? c.ignore_labels.map(normKey) : [])]),
         frigate: { url: String(c.frigate_url || '').replace(/\/+$/, ''), addon: String(c.frigate_addon || '').trim() },
-        species: (Array.isArray(c.species) && c.species.length ? c.species : DEFAULT_SPECIES).map((s) => ({
+        species: custom ? c.species.map((s) => ({
           id: s.id, name: s.name || pretty(s.id), one: s.one || (s.name || pretty(s.id)).replace(/e?s$/, ''),
           labels: s.labels || [s.id], glyph: s.glyph || '🐾',
-        })),
+        })) : null,
         coyote: {
           enabled: coy.enabled !== false,
           cameras: coy.cameras || ['Driveway', 'Front'],
@@ -212,6 +345,7 @@
         sp: null, cell: null, tune: false, cur: null, clip: false, limit: 60,
       };
       this._events = new Map();
+      this._dynMeta = new Map();
       this._people = new Map();
       this._loaded = false; this._error = null;
       if (this._root) { this._build(); this._fetch(true); }
@@ -286,6 +420,19 @@
       return typeof r === 'string' ? JSON.parse(r) : (r || []);
     }
 
+    async _wsSummary() {
+      const r = await this._hass.callWS({ type: 'frigate/events/summary', instance_id: this._cfg.instance });
+      return typeof r === 'string' ? JSON.parse(r) : (r || []);
+    }
+
+    _isIgnoredEvent(label, sub) {
+      const l = normKey(label); const s = normKey(sub);
+      if (this._cfg.ignore.has(l)) return true;
+      if (s && !EMPTY_SUB.has(s) && this._cfg.ignore.has(s)) return true;
+      if (l === 'unknown' && (!s || EMPTY_SUB.has(s))) return true;
+      return false;
+    }
+
     async _fetch(full) {
       if (!this._hass || this._busy) return;
       this._busy = true;
@@ -294,15 +441,43 @@
         const horizon = now - (this._ui.days + 1) * 86400;
         let after = horizon;
         if (!full && this._loaded && this._newest && this._span >= this._ui.days) after = Math.max(horizon, Math.floor(this._newest) - 7200);
-        const labels = [...new Set(this._cfg.species.flatMap((s) => s.labels))];
-        const jobs = [this._ws({ labels, after, limit: 10000 })];
         const coy = this._cfg.coyote;
-        if (coy.enabled) jobs.push(this._ws({ labels: ['dog'], cameras: coy.cameras, after, limit: 3000 }).catch(() => []));
-        const [wild, dogs = []] = await Promise.all(jobs);
-        if (full || after === horizon) this._events.clear();
-        const byLabel = new Map();
-        for (const s of this._cfg.species) for (const l of s.labels) if (!byLabel.has(l)) byLabel.set(l, s.id);
-        for (const e of wild) this._put(e, byLabel.get(e.label));
+        let wild; let dogs = [];
+        if (this._cfg.species) {
+          const labels = [...new Set(this._cfg.species.flatMap((s) => s.labels))];
+          const jobs = [this._ws({ labels, after, limit: 10000 })];
+          if (coy.enabled) jobs.push(this._ws({ labels: ['dog'], cameras: coy.cameras, after, limit: 3000 }).catch(() => []));
+          [wild, dogs = []] = await Promise.all(jobs);
+        } else {
+          const summary = await this._wsSummary().catch(() => null);
+          if (Array.isArray(summary)) {
+            const labels = [...new Set(summary.filter((x) => x.label && !this._isIgnoredEvent(x.label, x.sub_label)).map((x) => x.label))];
+            wild = labels.length ? await this._ws({ labels, after, limit: 10000 }) : [];
+          } else {
+            wild = await this._ws({ after, limit: 10000 });
+          }
+          if (coy.enabled) {
+            const coyCams = new Set(coy.cameras || []);
+            dogs = wild.filter((e) => !e.false_positive && coyCams.has(e.camera) && isDogLike(e.label, Array.isArray(e.sub_label) ? e.sub_label[0] : e.sub_label));
+            if (wild.length >= 10000 && coyCams.size) {
+              const extraDogs = await this._ws({ labels: ['dog'], cameras: coy.cameras, after, limit: 3000 }).catch(() => []);
+              const seen = new Set(dogs.map((d) => d.id));
+              for (const d of extraDogs) if (!seen.has(d.id)) dogs.push(d);
+            }
+          }
+        }
+        if (full || after === horizon) { this._events.clear(); this._dynMeta.clear(); }
+        if (this._cfg.species) {
+          const byLabel = new Map();
+          for (const s of this._cfg.species) for (const l of s.labels) if (!byLabel.has(normKey(l))) byLabel.set(normKey(l), s.id);
+          for (const e of wild) {
+            const sub = Array.isArray(e.sub_label) ? e.sub_label[0] : e.sub_label;
+            const sp = (sub && byLabel.get(normKey(sub))) || byLabel.get(normKey(e.label));
+            this._put(e, sp);
+          }
+        } else {
+          for (const e of wild) this._put(e);
+        }
         await this._coyotes(dogs);
         for (const [id, e] of this._events) if (e.start < horizon) this._events.delete(id);
         this._newest = Math.max(0, ...[...this._events.values()].map((e) => e.start));
@@ -315,11 +490,25 @@
     }
 
     _put(e, species, extra) {
-      if (!species || e.false_positive) return;
+      if (e.false_positive) return;
       const sub = Array.isArray(e.sub_label) ? e.sub_label[0] : e.sub_label;
+      let sp = species;
+      let spName = '';
+      if (!this._cfg.species && !sp) {
+        if (this._isIgnoredEvent(e.label, sub)) return;
+        const subClean = sub && !EMPTY_SUB.has(normKey(sub)) ? sub : '';
+        const raw = subClean || e.label;
+        spName = commonLabel(raw);
+        sp = slugId(spName);
+        if (!this._dynMeta.has(sp)) this._dynMeta.set(sp, { id: sp, name: spName, one: spName, glyph: glyphFor(spName, raw) });
+      } else if (sp === 'coyote' && !this._cfg.species && !this._dynMeta.has('coyote')) {
+        this._dynMeta.set('coyote', { id: 'coyote', name: 'Coyote', one: 'Coyote', glyph: '🐺' });
+        spName = 'Coyote';
+      }
+      if (!sp) return;
       const lt = this._local(e.start_time);
       this._events.set(e.id, {
-        id: e.id, sp: species, label: e.label, sub: sub || '', cam: e.camera, zones: e.zones || [],
+        id: e.id, sp, spName, label: e.label, sub: sub || '', cam: e.camera, zones: e.zones || [],
         start: e.start_time, end: e.end_time || null,
         score: e.data?.top_score ?? e.top_score ?? e.data?.score ?? 0,
         clip: !!e.has_clip, snap: !!e.has_snapshot, day: lt.day, hour: lt.hour, ...extra,
@@ -530,11 +719,35 @@
       const { sp, cell } = this._ui;
       return all.filter((e) => (!sp || e.sp === sp) && (!cell || ((cell.day == null || e.day === cell.day) && (cell.row == null || this._rowKey(e) === cell.row))));
     }
-    _spec(id) { return this._cfg.species.find((s) => s.id === id) || { id, name: pretty(id), one: pretty(id), glyph: '🐾' }; }
+    _species(all) {
+      if (this._cfg.species) return this._cfg.species;
+      const stats = new Map();
+      for (const e of all) {
+        let st = stats.get(e.sp);
+        if (!st) {
+          const meta = this._spec(e.sp);
+          st = { ...meta, count: 0, latest: 0 };
+          stats.set(e.sp, st);
+        }
+        st.count++;
+        if (e.start > st.latest) st.latest = e.start;
+      }
+      return [...stats.values()].sort((a, b) => {
+        if ((a.id === 'animal') !== (b.id === 'animal')) return a.id === 'animal' ? 1 : -1;
+        return b.count - a.count || b.latest - a.latest || a.name.localeCompare(b.name);
+      });
+    }
+    _spec(id) {
+      if (this._cfg.species) return this._cfg.species.find((s) => s.id === id) || { id, name: commonLabel(id), one: commonLabel(id), glyph: glyphFor(id) };
+      return this._dynMeta.get(id) || { id, name: commonLabel(id), one: commonLabel(id), glyph: glyphFor(id) };
+    }
     _name(e) {
       if (e.inferred) return e.pack > 1 ? `Likely coyotes ×${e.pack}` : 'Likely coyote';
-      const base = e.sp === 'other' || !this._spec(e.sp).one ? pretty(e.label) : this._spec(e.sp).one;
-      return e.sub ? `${base} · ${pretty(e.sub)}` : base;
+      const spec = this._spec(e.sp);
+      const subPretty = e.sub ? commonLabel(e.sub) : '';
+      const base = e.sp === 'other' || !spec.one ? commonLabel(e.label) : spec.one;
+      if (subPretty && !EMPTY_SUB.has(normKey(e.sub)) && normKey(subPretty) !== normKey(base)) return `${base} · ${subPretty}`;
+      return base;
     }
 
     /* Headline: alerts first, otherwise which animals are running above or
@@ -546,14 +759,16 @@
       const low = (s) => s.charAt(0).toLowerCase() + s.slice(1);
       const list = (a) => (a.length < 2 ? a.join('') : a.length === 2 ? `${a[0]} and ${a[1]}` : `${a[0]}, ${a[1]} and ${a.length - 2} more`);
       const fmtN = (x) => (x < 10 ? x.toFixed(1).replace(/\.0$/, '') : String(Math.round(x)));
+      const isRodent = (e) => e.sp === 'rodent' || /\b(rodent|rat|rats|mouse|mice|vole|gopher|woodrat|deermouse|muridae|cricetidae)\b/i.test(`${e.spName || ''} ${e.sub || ''} ${e.label || ''}`);
+      const isCat = (e) => e.sp === 'cat' || e.sp === 'domestic_cat';
       const up = []; const down = []; const notes = [];
-      for (const s of this._cfg.species) {
+      for (const s of this._species(all)) {
         const l = all.filter((e) => e.sp === s.id); if (!l.length) continue;
         const rec = l.filter((e) => now - e.start < D3).length; const base = (l.length - rec) / per3;
         if (rec >= 3 && rec >= 1.8 * Math.max(base, 0.5)) { up.push(s); notes.push(`${s.name} ${rec} in 3 days (usual ${fmtN(base)})`); }
         else if (base >= 3 && rec <= 0.5 * base) { down.push(s); notes.push(`${s.name} down, ${rec} in 3 days (usual ${fmtN(base)})`); }
       }
-      const rod = all.filter((e) => e.sp === 'rodent'); const cat = all.filter((e) => e.sp === 'cat');
+      const rod = all.filter(isRodent); const cat = all.filter(isCat);
       if (rod.length >= 4 && cat.length >= 4) {
         const keys = this._days().map((d) => d.key); const cnt = (l) => keys.map((k) => l.filter((e) => e.day === k).length);
         const x = cnt(rod); const y = cnt(cat); const n = keys.length; const mx = x.reduce((a, v) => a + v, 0) / n; const my = y.reduce((a, v) => a + v, 0) / n;
@@ -578,11 +793,11 @@
       const rec = all.filter((e) => now - e.start < D3).length;
       const s = notes.length ? notes.join(' · ') : (all.length ? `${rec} sightings in 3 days, in line with the last ${days}` : 'No wildlife recorded in this period');
       if (pack) return { rgb: R, icon: 'mdi:alert-circle', p: `Likely coyote pack · ${pretty(pack.cam)} · ${this._when(pack.start)}`, s };
-      if (inside) return { rgb: R, icon: 'mdi:alert-circle', p: `Rodent inside · ${pretty(inside.cam)} · ${this._when(inside.start)}`, s };
-      const warn = coy || up.some((x) => x.id === 'rodent' || x.id === 'coyote');
-      const names = (a) => { const n = a.map((x) => x.name); return list([n[0], ...n.slice(1).map(low)]); };
+      if (inside) return { rgb: R, icon: 'mdi:alert-circle', p: `${this._cfg.species ? 'Rodent' : this._name(inside)} inside · ${pretty(inside.cam)} · ${this._when(inside.start)}`, s };
+      const warn = coy || up.some((x) => x.id === 'coyote' || isRodent({ sp: x.id, spName: x.name }));
+      const names = (a) => { const n = a.map((x) => x.name); return this._cfg.species ? list([n[0], ...n.slice(1).map(low)]) : list(n); };
       let p = 'Wildlife activity steady';
-      if (up.length && down.length) p = `${names(up)} up, ${low(names(down))} down`;
+      if (up.length && down.length) p = `${names(up)} up, ${this._cfg.species ? low(names(down)) : names(down)} down`;
       else if (up.length) p = `${names(up)} more active than usual`;
       else if (down.length) p = `${names(down)} quieter than usual`;
       return { rgb: warn ? A : G, icon: this._cfg.icon, p, s };
@@ -639,7 +854,7 @@
     }
 
     _tiles(all) {
-      const html = this._cfg.species.map((s) => {
+      const html = this._species(all).map((s) => {
         const list = all.filter((e) => e.sp === s.id);
         const best = list.slice(0, 8).sort((a, b) => b.score - a.score)[0];
         const pack = s.id === 'coyote' && list.some((e) => (e.pack || 1) > 1);
@@ -655,7 +870,7 @@
       const u = this._ui; const days = this._days(); const f = this._fmt();
       const src = u.view === 'species' ? all : all.filter((e) => !u.sp || e.sp === u.sp);
       let rows;
-      if (u.view === 'species') rows = this._cfg.species.map((s) => ({ key: s.id, label: `${s.glyph} ${s.name}`, on: u.sp === s.id }));
+      if (u.view === 'species') rows = this._species(all).map((s) => ({ key: s.id, label: `${s.glyph} ${s.name}`, on: u.sp === s.id }));
       else if (u.view === 'hour') {
         rows = Array.from({ length: 12 }, (_, i) => {
           const from = `${(i * 2) % 12 || 12}${i < 6 ? 'a' : 'p'}`;
@@ -694,7 +909,7 @@
       const title = u.view === 'species' ? 'Sightings per day' : u.view === 'hour' ? `${sp} · time of day` : `${sp} · by camera`;
       const seg = [['species', 'Species'], ['hour', 'Time'], ['camera', 'Location']].map(([v, l]) => `<button data-act="view" data-v="${v}" aria-pressed="${u.view === v}">${l}</button>`).join('');
       this._$('.chart').innerHTML = `<div class="sub"><h3>${esc(title)}</h3><span class="seg" role="group">${seg}</span></div>
-        <div class="grid${today ? ' sky' : ''}${u.view === 'hour' ? ' hours' : ''}" style="--lab:${u.view === 'camera' ? '104px' : u.view === 'hour' ? '66px' : '92px'};--ch:${u.view === 'hour' ? '13px' : '18px'}">
+        <div class="grid${today ? ' sky' : ''}${u.view === 'hour' ? ' hours' : ''}" style="--lab:${u.view === 'camera' ? '104px' : u.view === 'hour' ? '66px' : this._cfg.species ? '92px' : 'clamp(96px, 28%, 144px)'};--ch:${u.view === 'hour' ? '13px' : '18px'}">
           ${rows.length ? `<div class="rows">${body}</div><div class="axis"><i></i><div>${ticks}</div><i></i></div>` : '<div class="empty" style="padding-left:0">Nothing to chart for this selection.</div>'}
           <div class="tip" hidden></div></div>
         <div class="key"><span>fewer</span><u style="--a:.3"></u><u style="--a:.55"></u><u style="--a:.75"></u><u style="--a:1"></u><span>more${u.view === 'species' ? ' · each row on its own scale' : ''}</span></div>`;
@@ -974,7 +1189,7 @@
       if (!this._form) {
         const note = document.createElement('ha-alert');
         note.setAttribute('alert-type', 'info');
-        note.textContent = 'Species groups are edited in YAML. Anything set here is kept when you switch.';
+        note.textContent = 'Detected species are discovered automatically from Frigate labels and sublabels. Optional species groups can still be set in YAML.';
         note.style.display = 'block';
         note.style.marginBottom = '12px';
         this.appendChild(note);

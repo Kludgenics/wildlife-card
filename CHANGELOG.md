@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.0 — 2026-11-15
+
+- **Dynamic species discovery for custom models (MegaDetector, SpeciesNet, etc.).** When `species` is not explicitly configured in YAML, the card now discovers wildlife classes directly from Frigate via `frigate/events/summary` (falling back to unfiltered `frigate/events/get`) instead of filtering only for the eight hardcoded Frigate+ classes.
+- **Sub-label first grouping with common names and pretty labels.** Detections such as MegaDetector `animal` with SpeciesNet `sub_label`s are grouped by species (`Eastern Fox Squirrel`, `Gray Fox`, `Virginia Opossum`, etc.), taxonomic rollups and scientific names map cleanly to common English names (`sciuridae family` → `Squirrel Family`, `dasypus species` → `Armadillo`, `urocyon cinereoargenteus` → `Gray Fox`), spelling/case variants merge cleanly, and unclassified `animal` events fall back to an `Animal` bucket sorted at the end.
+- **Non-wildlife detector filtering (`ignore_labels`).** Built-in non-wildlife detector labels (`person`, `car`, `vehicle`, `license_plate`, etc.) are automatically excluded during discovery, and `ignore_labels` lets users exclude additional classes in YAML.
+- **Coyote inference works with SpeciesNet.** Night-time `domestic dog` sub-labels on `animal` tracks trigger coyote inference identically to `dog` labels.
+
 ## 1.3.4 — 2026-11-14
 
 - **Inside the Companion apps the Frigate button opens Home Assistant's own Frigate panel.** 1.3.3 sent the app's view to the ingress address, and the app answered by reloading the frontend, so the tap landed on the default dashboard and never reached Frigate. The panel is the one route known to work there. It opens Frigate's front page rather than the sighting; browsers keep the link to the sighting itself, as does a plain `frigate_url`.

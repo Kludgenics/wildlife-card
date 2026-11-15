@@ -62,13 +62,14 @@ const shot = async (page, name) => {
   await el.screenshot({ path: path.join(OUT, name) });
 };
 
-/* 1 — overview renders, one tile per species, newest-first browser */
+/* 1 — overview renders, one tile per discovered species, newest-first browser */
 {
   const page = await open();
-  check((await page.$$c(".tile")).length === 8, "eight species tiles");
+  const tiles = (await page.$$c(".tile")).length;
+  check(tiles >= 8, `species tiles discovered dynamically (${tiles})`);
   check(!!(await page.text$(".hl .p")), "headline has a top line");
   check((await page.$$c(".shot")).length > 5, "sightings filmstrip is populated");
-  check((await page.$$c(".row")).length === 8, "activity grid has a row per species");
+  check((await page.$$c(".row")).length === tiles, "activity grid has a row per species");
   await shot(page, "overview-light.png");
 
   /* 2 — a species tile filters the grid and the browser */
@@ -208,7 +209,7 @@ const shot = async (page, name) => {
   const txt = await page.text$('.tile[data-v="coyote"] i');
   check(!/none/.test(txt), "a lone night dog still counts");
   const page2 = await open("&quiet=1&config=" + encodeURIComponent('{"coyote":{"enabled":false}}'));
-  check(/none/.test(await page2.text$('.tile[data-v="coyote"] i')), "coyote inference can be switched off");
+  check(!(await page2.$('wildlife-card .tile[data-v="coyote"]')), "coyote inference can be switched off");
   await page.close(); await page2.close();
 }
 
@@ -216,7 +217,8 @@ const shot = async (page, name) => {
 {
   const page = await open("", 820);
   await page.click$('[data-act="days"][data-v="30"]');
-  check((await page.$$c(".row .cells .c")).length / 8 === 30, "30-day range draws thirty columns");
+  const rows = (await page.$$c(".row")).length;
+  check(rows > 0 && (await page.$$c(".row .cells .c")).length === rows * 30, "30-day range draws thirty columns");
   const widths = await page.$$eval("wildlife-card .rows .row:first-child .c",
     (cs) => [...new Set(cs.map((c) => Math.round(c.getBoundingClientRect().width * 10)))]);
   check(widths.length === 1, `every column is the same width (${widths.map((w) => w / 10).join(", ")}px)`);
@@ -296,6 +298,54 @@ const shot = async (page, name) => {
   await page.waitForSelector("wildlife-card .stage .err");
   check((await page.text$(".stage .err")).includes("could not be reached"), "a Frigate that cannot be reached explains itself");
   check(!(await page.$(`wildlife-card ${SEL}`)), "and offers no link at all rather than a broken one");
+  await page.close();
+}
+
+/* 10 — MegaDetector + SpeciesNet dynamic discovery, common names, pretty labels, coyote inference */
+{
+  const page = await open("&mode=speciesnet");
+  const names = await page.$$eval("wildlife-card .tile b", (els) => els.map((e) => e.textContent.trim()));
+  check(!names.includes("Person") && !names.includes("Car"), "person and car detector classes are excluded");
+  check(names.filter((n) => n === "Eastern Fox Squirrel").length === 1,
+    `case variants merge into pretty label (${names.join(", ")})`);
+  check(names.filter((n) => n === "Gray Fox").length === 1, "grey/gray fox variants merge into Gray Fox");
+  check(names.includes("Squirrel Family"), "SpeciesNet family rollup uses common name (Squirrel Family)");
+  check(names.includes("Armadillo"), "SpeciesNet genus rollup uses common name (Armadillo)");
+  check(names.includes("Coyote"), "Coyote inferred from SpeciesNet domestic dog at night");
+  check(names[names.length - 1] === "Animal", "generic Animal bucket sorts to the end");
+  const coy = await page.$('wildlife-card .tile[data-v="coyote"] .n');
+  check(coy && +(await coy.textContent()) === 2, "person-adjacent night dog does not count as coyote");
+  await page.click$('.tile[data-v="gray_fox"]');
+  await page.click$(".shot");
+  const cap = await page.text$(".stage .p");
+  check(!/Gray Fox\s*·\s*Gray Fox/i.test(cap), `stage caption does not duplicate species name (${cap})`);
+  await shot(page, "speciesnet-dynamic.png");
+  check(page.errors.length === 0, `speciesnet mode renders without errors (${page.errors.slice(0, 2).join("; ")})`);
+  await page.close();
+}
+
+/* 11 — explicit custom species config still works (backwards compatibility) */
+{
+  const cfg = encodeURIComponent(JSON.stringify({
+    species: [
+      { id: "raccoon", name: "Trash Pandas", glyph: "🦝" },
+      { id: "fox", name: "Foxes", glyph: "🦊" },
+    ],
+  }));
+  const page = await open(`&config=${cfg}`);
+  const names = await page.$$eval("wildlife-card .tile b", (els) => els.map((e) => e.textContent.trim()));
+  check(names.length === 2 && names[0] === "Trash Pandas" && names[1] === "Foxes",
+    `explicit species config preserved (${names.join(", ")})`);
+  await page.close();
+}
+
+/* 12 — summary RPC failure falls back gracefully to unfiltered events */
+{
+  const page = await open("&mode=speciesnet&nosummary=1");
+  const names = await page.$$eval("wildlife-card .tile b", (els) => els.map((e) => e.textContent.trim()));
+  check(names.includes("Eastern Fox Squirrel") && names.includes("Gray Fox"),
+    `fallback without summary discovers SpeciesNet sublabels (${names.slice(0, 4).join(", ")})`);
+  check(page.errors.length === 0, `summary fallback runs without console errors (${page.errors.slice(0, 2).join("; ")})`);
   await page.close();
 }
 

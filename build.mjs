@@ -10,7 +10,7 @@ await build({
   bundle: true, format: "esm", minify: true, target: "es2020",
   entryNames: "[name]", chunkNames: "wildlife-[name]-[hash]",
   legalComments: "eof",
-  banner: { js: `/*! wildlife-card v${pkg.version} | MIT | https://github.com/FortranFour/wildlife-card */` },
+  banner: { js: `/*! wildlife-card v${pkg.version} | MIT | https://github.com/Kludgenics/wildlife-card */` },
   define: { __VERSION__: JSON.stringify(pkg.version) },
   logLevel: "info",
 });

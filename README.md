@@ -18,13 +18,13 @@ A Home Assistant dashboard card for the animals your [Frigate](https://frigate.v
 ## Requirements
 
 - [Frigate](https://frigate.video) and the [Frigate integration](https://github.com/blakeblackshear/frigate-hass-integration) for Home Assistant.
-- Animal labels in your Frigate `objects → track` list. Most of them (`rodent`, `rabbit`, `raccoon`, `squirrel`, `fox`, `skunk`, `possum`) come from a [Frigate+](https://frigate.video/plus) model; `bird`, `cat` and `dog` are in the default model as well.
+- Tracked objects in Frigate — works automatically with both [Frigate+](https://frigate.video/plus) labels and general detectors + classifiers such as MegaDetector (`animal`, `person`, `car`) with SpeciesNet `sub_label` classification.
 
 ## Install
 
-**HACS:** HACS → ⋮ → *Custom repositories* → add `https://github.com/FortranFour/wildlife-card` as type **Dashboard**, then install *Wildlife Card*. HACS adds the resource `/hacsfiles/wildlife-card/wildlife-card.js`.
+**HACS / HA Marketplace:** Custom repositories → add `https://github.com/Kludgenics/wildlife-card` as type **Dashboard**, then install *Wildlife Card*.
 
-**Manual:** download every file attached to the [latest release](https://github.com/FortranFour/wildlife-card/releases) into `/config/www/wildlife-card/`, then add `/local/wildlife-card/wildlife-card.js` as a JavaScript module resource. Keep the other file beside it — the card loads it the first time you play a clip.
+**Manual:** download every file attached to the [latest release](https://github.com/Kludgenics/wildlife-card/releases) into `/config/www/wildlife-card/`, then add `/local/wildlife-card/wildlife-card.js` as a JavaScript module resource. Keep the other file beside it — the card loads it the first time you play a clip.
 
 ## Add the card
 
@@ -81,7 +81,8 @@ Quote `start` and `end`. Unquoted, YAML reads `23:00` as a number and the night 
 | `coyote.start` | `'23:00'` | Start of the night window. |
 | `coyote.end` | `'05:00'` | End of the night window. |
 | `coyote.person_window` | `120` | Seconds either side of a dog to look for a person. |
-| `species` | the eight below | Replaces the built-in species list entirely. |
+| `ignore_labels` | `[]` | Extra detector labels or sub-labels to exclude during automatic species discovery (in addition to `person`, `car`, `vehicle`, etc.). |
+| `species` | dynamic | Discovers detected wildlife classes and sub-labels automatically when omitted; set an explicit list to override with fixed species groups. |
 
 `days`, `min_score` and the grid's row mode are starting values. Once you use those controls the card remembers your choice in that browser, and the YAML no longer decides them.
 
@@ -89,16 +90,10 @@ The card is 12 columns wide by default and switches to a single row of tiles and
 
 ## Species
 
-The default list, in tile order:
+By default, the card discovers wildlife species dynamically from Frigate (using `frigate/events/summary` and recent sightings):
 
-| id | Labels it collects | id | Labels it collects |
-|---|---|---|---|
-| `rodent` | `rodent` | `raccoon` | `raccoon` |
-| `cat` | `cat` | `coyote` | `coyote` (plus the inference) |
-| `rabbit` | `rabbit` | `squirrel` | `squirrel` |
-| `bird` | `bird` | `other` | `fox`, `skunk`, `possum`, `snake` |
-
-Give `species` to change the grouping — which animals get a tile of their own, what they are called, and the order they appear in:
+- **Sub-label first:** Detections from general models like MegaDetector (`animal` with SpeciesNet `sub_label`s) are promoted into their own species tiles (`Eastern Fox Squirrel`, `Gray Fox`, `Virginia Opossum`, etc.), mapped to common English names and Title Case labels, with generic unclassified `animal` detections sorted at the end.
+- **Explicit groups:** Pass `species` in YAML to lock the card to custom species groups, labels, icons, and tile order:
 
 ```yaml
 species:
