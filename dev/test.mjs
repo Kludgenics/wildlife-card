@@ -367,6 +367,50 @@ const shot = async (page, name) => {
   await page.close();
 }
 
+/* 13 — clip lead-in and lead-out VOD/recording paths and default off */
+{
+  const defPage = await open();
+  await defPage.click$(".shot");
+  const defOut = await defPage.evaluate(() => {
+    const e = window.card._list.find((x) => x.id === window.card._ui.cur);
+    return window.card._clipPaths(e);
+  });
+  check(defOut === null, "default 0s lead-in and lead-out preserve unpadded event clips");
+  await defPage.close();
+
+  const customCfg = encodeURIComponent(JSON.stringify({ clip_lead_in: 8, clip_lead_out: 3 }));
+  const page = await open(`&config=${customCfg}`);
+  page.ignore(/ERR_UNKNOWN_URL_SCHEME|about:blank|Failed to load/);
+  await page.evaluate(() => {
+    window._signedPaths = [];
+    const orig = window.hass.callWS.bind(window.hass);
+    window.hass.callWS = async (msg) => {
+      if (msg.type === "auth/sign_path") window._signedPaths.push(msg.path);
+      return orig(msg);
+    };
+  });
+  await page.click$(".shot");
+  await page.click$('[data-act="clip"]');
+  await page.waitForSelector("wildlife-card .fail", { timeout: 15000 }).catch(() => {});
+  const out = await page.evaluate(() => {
+    const e = window.card._list.find((x) => x.id === window.card._ui.cur);
+    return {
+      e: { cam: e.cam, start: e.start, end: e.end },
+      paths: window.card._clipPaths(e),
+      signed: window._signedPaths,
+    };
+  });
+  const expStart = Math.floor(out.e.start - 8);
+  const expEnd = Math.ceil(out.e.end + 3);
+  check(out.paths?.hls === `/api/frigate/frigate/vod/${encodeURIComponent(out.e.cam)}/start/${expStart}/end/${expEnd}/index.m3u8`,
+    `custom lead-in/out builds padded VOD playlist (${out.paths?.hls})`);
+  check(out.paths?.mp4 === `/api/frigate/frigate/recording/${encodeURIComponent(out.e.cam)}/start/${expStart}/end/${expEnd}`,
+    `custom lead-in/out builds padded recording MP4 (${out.paths?.mp4})`);
+  check(out.signed.includes(out.paths.hls) && out.signed.includes(out.paths.mp4),
+    "both padded VOD playlist and recording MP4 are signed via auth/sign_path");
+  await page.close();
+}
+
 await browser.close();
 server.close();
 console.log(failures.length ? `\n${failures.length} check(s) failed` : `\nall checks passed — screenshots in dev/out/`);
