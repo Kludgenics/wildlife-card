@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.1 — 2026-11-15
+
+- **Lead-in and lead-out time on video clips (`clip_lead_in`, `clip_lead_out`).** Clips now default to 5 seconds of recording lead-in and 5 seconds of lead-out via Frigate integration's signed VOD playlist (`/vod/.../start/.../end/.../index.m3u8`, with `authSig` propagation in `hls.js`) and recording MP4 endpoint (`/recording/.../start/.../end/...`), falling back automatically to the unpadded event clip if continuous/motion retention is unavailable. Both values are configurable in YAML and the visual editor.
+
 ## 1.4.0 — 2026-11-15
 
 - **Dynamic species discovery for custom models (MegaDetector, SpeciesNet, etc.).** When `species` is not explicitly configured in YAML, the card now discovers wildlife classes directly from Frigate via `frigate/events/summary` (falling back to unfiltered `frigate/events/get`) instead of filtering only for the eight hardcoded Frigate+ classes.

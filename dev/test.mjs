@@ -349,6 +349,61 @@ const shot = async (page, name) => {
   await page.close();
 }
 
+/* 13 — clip lead-in and lead-out VOD/recording paths and config overrides */
+{
+  const page = await open();
+  page.ignore(/ERR_UNKNOWN_URL_SCHEME|about:blank|Failed to load/);
+  const signed = [];
+  await page.evaluate(() => {
+    window._signedPaths = [];
+    const orig = window.hass.callWS.bind(window.hass);
+    window.hass.callWS = async (msg) => {
+      if (msg.type === "auth/sign_path") window._signedPaths.push(msg.path);
+      return orig(msg);
+    };
+  });
+  await page.click$(".shot");
+  await page.click$('[data-act="clip"]');
+  await page.waitForSelector("wildlife-card .fail", { timeout: 15000 }).catch(() => {});
+  const out = await page.evaluate(() => {
+    const e = window.card._list.find((x) => x.id === window.card._ui.cur);
+    return {
+      e: { cam: e.cam, start: e.start, end: e.end },
+      paths: window.card._clipPaths(e),
+      signed: window._signedPaths,
+    };
+  });
+  const expStart = Math.floor(out.e.start - 5);
+  const expEnd = Math.ceil(out.e.end + 5);
+  check(out.paths?.hls === `/api/frigate/frigate/vod/${encodeURIComponent(out.e.cam)}/start/${expStart}/end/${expEnd}/index.m3u8`,
+    `default 5s lead-in/out builds padded VOD playlist (${out.paths?.hls})`);
+  check(out.paths?.mp4 === `/api/frigate/frigate/recording/${encodeURIComponent(out.e.cam)}/start/${expStart}/end/${expEnd}`,
+    `default 5s lead-in/out builds padded recording MP4 (${out.paths?.mp4})`);
+  check(out.signed.includes(out.paths.hls) && out.signed.includes(out.paths.mp4),
+    "both padded VOD playlist and recording MP4 are signed via auth/sign_path");
+  await page.close();
+
+  const customCfg = encodeURIComponent(JSON.stringify({ clip_lead_in: 8, clip_lead_out: 3 }));
+  const page2 = await open(`&config=${customCfg}`);
+  const custom = await page2.evaluate(() => {
+    const e = window.card._filtered(window.card._events ? [...window.card._events.values()] : [])[0];
+    return { s: Math.floor(e.start - 8), t: Math.ceil(e.end + 3), p: window.card._clipPaths(e) };
+  });
+  check(custom.p?.hls.includes(`/start/${custom.s}/end/${custom.t}/`),
+    `custom clip_lead_in/clip_lead_out adjust padding (${custom.p?.hls})`);
+  await page2.close();
+
+  const zeroCfg = encodeURIComponent(JSON.stringify({ clip_lead_in: 0, clip_lead_out: 0 }));
+  const page3 = await open(`&config=${zeroCfg}`);
+  await page3.click$(".shot");
+  const zeroOut = await page3.evaluate(() => {
+    const e = window.card._list.find((x) => x.id === window.card._ui.cur);
+    return window.card._clipPaths(e);
+  });
+  check(zeroOut === null, "zero lead-in and lead-out disable VOD padding");
+  await page3.close();
+}
+
 await browser.close();
 server.close();
 console.log(failures.length ? `\n${failures.length} check(s) failed` : `\nall checks passed — screenshots in dev/out/`);
