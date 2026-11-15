@@ -102,8 +102,8 @@
 
   const GLYPH_RULES = [
     [/coyote|wolf|wolves|jackal/, '🐺'],
-    [/\bfox\b/, '🦊'],
     [/squirrel|chipmunk|marmot|groundhog|woodchuck|gopher/, '🐿️'],
+    [/\bfox\b/, '🦊'],
     [/raccoon|coati|ringtail|cacomistle/, '🦝'],
     [/\bskunk\b/, '🦨'],
     [/badger|wolverine/, '🦡'],

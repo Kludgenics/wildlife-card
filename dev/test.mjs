@@ -308,6 +308,9 @@ const shot = async (page, name) => {
   check(!names.includes("Person") && !names.includes("Car"), "person and car detector classes are excluded");
   check(names.filter((n) => n === "Eastern Fox Squirrel").length === 1,
     `case variants merge into pretty label (${names.join(", ")})`);
+  const sqGlyph = await page.textContent('wildlife-card .tile[data-v="eastern_fox_squirrel"] .pic span');
+  const foxGlyph = await page.textContent('wildlife-card .tile[data-v="gray_fox"] .pic span');
+  check(sqGlyph === "🐿️" && foxGlyph === "🦊", `Eastern Fox Squirrel gets squirrel glyph (${sqGlyph}) while Gray Fox gets fox (${foxGlyph})`);
   check(names.filter((n) => n === "Gray Fox").length === 1, "grey/gray fox variants merge into Gray Fox");
   check(names.includes("Squirrel Family"), "SpeciesNet family rollup uses common name (Squirrel Family)");
   check(names.includes("Armadillo"), "SpeciesNet genus rollup uses common name (Armadillo)");
